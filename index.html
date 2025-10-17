@@ -259,6 +259,18 @@ def reverse_convert(s: str, preferences=None) -> str:
       el.style.display = (el.style.display === "none") ? "block" : "none";
     });
 
+    // Utility to safely destroy Pyodide PyProxy objects if they expose destroy()
+    function maybeDestroy(obj) {
+      try {
+        if (obj && typeof obj === "object" && typeof obj.destroy === "function") {
+          obj.destroy();
+        }
+      } catch (e) {
+        // swallow; best-effort cleanup
+        console.warn("maybeDestroy error:", e);
+      }
+    }
+
     // Load Pyodide and register the Python functions
     async function initPyodideAndRegister() {
       const status = document.getElementById("status");
@@ -297,14 +309,16 @@ def reverse_convert(s: str, preferences=None) -> str:
       const outputEl = document.getElementById("forward-output");
       outputEl.value = "Running…";
       try {
-        // Grab the Python function object and call it
+        if (!window.pyodide) throw new Error("Pyodide not initialized");
         const pyConvert = pyodide.globals.get("convert_text");
+        // call the Python function
         const resultPy = pyConvert(input);
-        const result = resultPy.toString();
-        // cleanup proxies
-        resultPy.destroy();
-        pyConvert.destroy();
+        // Safely convert to string and clean up proxies only if applicable
+        const result = (resultPy && typeof resultPy.toString === "function") ? resultPy.toString() : String(resultPy);
         outputEl.value = result;
+        // cleanup proxies if they are proxies
+        maybeDestroy(resultPy);
+        maybeDestroy(pyConvert);
       } catch (err) {
         console.error(err);
         outputEl.value = "Error: " + String(err);
@@ -317,16 +331,14 @@ def reverse_convert(s: str, preferences=None) -> str:
       const outputEl = document.getElementById("reverse-output");
       outputEl.value = "Running…";
       try {
+        if (!window.pyodide) throw new Error("Pyodide not initialized");
         const pyReverse = pyodide.globals.get("reverse_convert");
-        const prefs = pyodide.globals.get("PREFERENCES"); // uses the default preferences defined in Python
-        // Call reverse_convert(input, preferences=PREFERENCES)
-        // In Pyodide calling python function with multiple args: pass input only and let the function use default PREFERENCES.
+        // Call reverse_convert(input) — let the Python function use its default PREFERENCES
         const resultPy = pyReverse(input);
-        const result = resultPy.toString();
-        resultPy.destroy();
-        pyReverse.destroy();
-        if (prefs) prefs.destroy();
+        const result = (resultPy && typeof resultPy.toString === "function") ? resultPy.toString() : String(resultPy);
         outputEl.value = result;
+        maybeDestroy(resultPy);
+        maybeDestroy(pyReverse);
       } catch (err) {
         console.error(err);
         outputEl.value = "Error: " + String(err);
