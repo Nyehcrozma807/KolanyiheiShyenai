@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Alphabet Converter (Forward & Reverse) — Pyodide</title>
+  <style>
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; margin: 20px; }
+    h1 { margin-top: 0; }
+    .section { border: 1px solid #ddd; padding: 12px; border-radius: 6px; margin-bottom: 18px; }
+    textarea { width: 100%; min-height: 100px; font-family: monospace; font-size: 14px; padding: 8px; box-sizing: border-box; }
+    .controls { margin-top: 8px; display:flex; gap:8px; flex-wrap:wrap; }
+    button { padding: 8px 12px; font-size: 14px; cursor: pointer; }
+    .status { margin-bottom: 12px; color: #555; }
+    label.small { font-size: 13px; color: #333; display:block; margin-bottom:4px; }
+    pre.pycode { background:#f6f8fa; padding:8px; border-radius:6px; overflow:auto; max-height:180px; }
+  </style>
+</head>
+<body>
+  <h1>Alphabet Converter — Forward & Reverse (runs in-browser with Pyodide)</h1>
+  <div class="status" id="status">Loading Pyodide…</div>
+
+  <div class="section" id="forward-section">
+    <h2>Forward: Latin → Symbol Alphabet</h2>
+    <label class="small" for="forward-input">Enter Latin text (will match digraphs CH and SH first, case-insensitive):</label>
+    <textarea id="forward-input" placeholder="Type or paste Latin text here...">Hello, world!</textarea>
+    <div class="controls">
+      <button id="forward-run">Run Forward Conversion</button>
+      <button id="download-forward">Download forward script (.py)</button>
+      <button id="show-forward-code">Show/Hide Python Code</button>
+    </div>
+    <label class="small" for="forward-output">Converted output:</label>
+    <textarea id="forward-output" readonly placeholder="Converted text appears here..."></textarea>
+    <pre class="pycode" id="forward-code" style="display:none"></pre>
+  </div>
+
+  <div class="section" id="reverse-section">
+    <h2>Reverse: Symbol → Latin Alphabet</h2>
+    <label class="small" for="reverse-input">Enter symbol-text (the special-symbol alphabet):</label>
+    <textarea id="reverse-input" placeholder="Paste converted symbol text here..."></textarea>
+    <div class="controls">
+      <button id="reverse-run">Run Reverse Conversion</button>
+      <button id="download-reverse">Download reverse script (.py)</button>
+      <button id="show-reverse-code">Show/Hide Python Code</button>
+    </div>
+    <label class="small" for="reverse-output">Result (best-effort, uses preferences to disambiguate):</label>
+    <textarea id="reverse-output" readonly placeholder="Reconverted Latin text appears here..."></textarea>
+    <pre class="pycode" id="reverse-code" style="display:none"></pre>
+  </div>
+
+  <script type="text/javascript">
+    // The two Python scripts embedded as template literals.
+    const forward_py = `#!/usr/bin/env python3
+\"\"\"forward converter: Latin -> special-symbol alphabet (case-insensitive)
+
+Mapping:
+A  = V́
+B  = Г
+CH = T
+D  = コ
+E  = H
+F  = ∀
+G  = 7
+H  = X
+I  = И
+J  = ﾚ̀
+C/K/Q = ヲ
+L/R = Z
+M  = П
+N  = L
+O  = V̀
+P  = F
+S  = Λ
+SH = ﾚ
+T  = E
+U  = V̄
+V  = V
+W  = V
+X  = A
+Y  = K
+Z  = A
+\"\"\"
+
+MAPPING = {
+    # Digraphs
+    "CH": "T",
+    "SH": "ﾚ",
+    # Single letters
+    "A": "V́",
+    "B": "Г",
+    "C": "ヲ",
+    "D": "コ",
+    "E": "H",
+    "F": "∀",
+    "G": "7",
+    "H": "X",
+    "I": "И",
+    "J": "ﾚ̀",
+    "K": "ヲ",
+    "L": "Z",
+    "M": "П",
+    "N": "L",
+    "O": "V̀",
+    "P": "F",
+    "Q": "ヲ",
+    "R": "Z",
+    "S": "Λ",
+    "T": "E",
+    "U": "V̄",
+    "V": "V",
+    "W": "V",
+    "X": "A",
+    "Y": "K",
+    "Z": "A",
+}
+
+def convert_text(s: str) -> str:
+    out = []
+    i = 0
+    n = len(s)
+    while i < n:
+        # Try two-character digraph (case-insensitive)
+        if i + 1 < n:
+            two = (s[i] + s[i+1]).upper()
+            if two in MAPPING:
+                out.append(MAPPING[two])
+                i += 2
+                continue
+        # Single character
+        ch = s[i]
+        up = ch.upper()
+        if up in MAPPING:
+            out.append(MAPPING[up])
+        else:
+            out.append(ch)
+        i += 1
+    return \"\".join(out)
+`;
+
+    const reverse_py = `#!/usr/bin/env python3
+\"\"\"reverse converter: symbol -> Latin (best-effort)
+
+Uses the forward mapping and inverts it. Provides PREFERENCES to disambiguate:
+- \"ヲ\" defaults to \"K\" (C/K/Q all map to ヲ forward)
+- \"Z\" defaults to \"L\" (L/R)
+- \"A\" defaults to \"Z\" (X/Z)
+- \"V\" defaults to \"V\" (V/W)
+\"\"\"
+
+FORWARD = {
+    "CH": "T",
+    "SH": "ﾚ",
+    "A": "V́",
+    "B": "Г",
+    "C": "ヲ",
+    "D": "コ",
+    "E": "H",
+    "F": "∀",
+    "G": "7",
+    "H": "X",
+    "I": "И",
+    "J": "ﾚ̀",
+    "K": "ヲ",
+    "L": "Z",
+    "M": "П",
+    "N": "L",
+    "O": "V̀",
+    "P": "F",
+    "Q": "ヲ",
+    "R": "Z",
+    "S": "Λ",
+    "T": "E",
+    "U": "V̄",
+    "V": "V",
+    "W": "V",
+    "X": "A",
+    "Y": "K",
+    "Z": "A",
+}
+
+PREFERENCES = {
+    "ヲ": "K",  # requested default
+    "Z": "L",
+    "A": "Z",
+    "V": "V",
+}
+
+def build_reverse_map(forward_map):
+    rev = {}
+    for latin, sym in forward_map.items():
+        rev.setdefault(sym, []).append(latin)
+    return rev
+
+REVERSE = build_reverse_map(FORWARD)
+SYMBOLS_SORTED = sorted(REVERSE.keys(), key=len, reverse=True)
+
+def choose_latin_for_symbol(symbol, preferences=None):
+    options = REVERSE.get(symbol)
+    if not options:
+        return None
+    if len(options) == 1:
+        return options[0]
+    if preferences and symbol in preferences and preferences[symbol] in options:
+        return preferences[symbol]
+    return sorted(options)[0]
+
+def reverse_convert(s: str, preferences=None) -> str:
+    out = []
+    i = 0
+    n = len(s)
+    while i < n:
+        matched = False
+        for sym in SYMBOLS_SORTED:
+            if s.startswith(sym, i):
+                latin = choose_latin_for_symbol(sym, preferences)
+                if latin is None:
+                    out.append(sym)
+                else:
+                    out.append(latin)
+                i += len(sym)
+                matched = True
+                break
+        if not matched:
+            out.append(s[i])
+            i += 1
+    return \"\".join(out)
+`;
+
+    // Helper to create downloadable blobs for the Python scripts
+    function downloadFile(filename, text) {
+      const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    // Set code preview areas
+    document.getElementById("forward-code").textContent = forward_py;
+    document.getElementById("reverse-code").textContent = reverse_py;
+
+    document.getElementById("download-forward").addEventListener("click", () => {
+      downloadFile("alphabet_converter_forward.py", forward_py);
+    });
+    document.getElementById("download-reverse").addEventListener("click", () => {
+      downloadFile("alphabet_converter_reverse.py", reverse_py);
+    });
+
+    document.getElementById("show-forward-code").addEventListener("click", () => {
+      const el = document.getElementById("forward-code");
+      el.style.display = (el.style.display === "none") ? "block" : "none";
+    });
+    document.getElementById("show-reverse-code").addEventListener("click", () => {
+      const el = document.getElementById("reverse-code");
+      el.style.display = (el.style.display === "none") ? "block" : "none";
+    });
+
+    // Load Pyodide and register the Python functions
+    async function initPyodideAndRegister() {
+      const status = document.getElementById("status");
+      try {
+        status.textContent = "Loading Pyodide (this may take a few seconds)…";
+        // Load pyodide
+        const pyodideScript = document.createElement("script");
+        pyodideScript.src = "https://cdn.jsdelivr.net/pyodide/v0.23.4/full/pyodide.js";
+        document.head.appendChild(pyodideScript);
+        await new Promise((resolve, reject) => {
+          pyodideScript.onload = resolve;
+          pyodideScript.onerror = reject;
+        });
+
+        // initialize pyodide
+        window.pyodide = await loadPyodide({ indexURL: "https://cdn.jsdelivr.net/pyodide/v0.23.4/full/" });
+        status.textContent = "Pyodide loaded. Registering converters…";
+
+        // Execute the embedded Python code to define functions in the Pyodide global namespace
+        pyodide.runPython(forward_py);
+        pyodide.runPython(reverse_py);
+
+        // Ready
+        status.textContent = "Ready — converters registered. Enter text and click Run.";
+      } catch (err) {
+        console.error(err);
+        status.textContent = "Failed to load Pyodide: " + String(err);
+      }
+    }
+
+    initPyodideAndRegister();
+
+    // Run forward conversion
+    document.getElementById("forward-run").addEventListener("click", async () => {
+      const input = document.getElementById("forward-input").value;
+      const outputEl = document.getElementById("forward-output");
+      outputEl.value = "Running…";
+      try {
+        // Grab the Python function object and call it
+        const pyConvert = pyodide.globals.get("convert_text");
+        const resultPy = pyConvert(input);
+        const result = resultPy.toString();
+        // cleanup proxies
+        resultPy.destroy();
+        pyConvert.destroy();
+        outputEl.value = result;
+      } catch (err) {
+        console.error(err);
+        outputEl.value = "Error: " + String(err);
+      }
+    });
+
+    // Run reverse conversion (uses PREFERENCES in the Python code by default)
+    document.getElementById("reverse-run").addEventListener("click", async () => {
+      const input = document.getElementById("reverse-input").value;
+      const outputEl = document.getElementById("reverse-output");
+      outputEl.value = "Running…";
+      try {
+        const pyReverse = pyodide.globals.get("reverse_convert");
+        const prefs = pyodide.globals.get("PREFERENCES"); // uses the default preferences defined in Python
+        // Call reverse_convert(input, preferences=PREFERENCES)
+        // In Pyodide calling python function with multiple args: pass input only and let the function use default PREFERENCES.
+        const resultPy = pyReverse(input);
+        const result = resultPy.toString();
+        resultPy.destroy();
+        pyReverse.destroy();
+        if (prefs) prefs.destroy();
+        outputEl.value = result;
+      } catch (err) {
+        console.error(err);
+        outputEl.value = "Error: " + String(err);
+      }
+    });
+  </script>
+</body>
+</html>
